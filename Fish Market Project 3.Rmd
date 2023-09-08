@@ -1,0 +1,318 @@
+---
+title: "Fish Market Project"
+author: "Trinity Miller"
+date: "2023-03-21"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE)
+```
+
+```{r, message=FALSE, warning=FALSE}
+library (tidymodels)
+library (tidyverse)
+set.seed(1)
+```
+
+```{r, message = FALSE, warning = FALSE}
+market_data = read_csv("/Users/17242/Documents/Fish Market Project/Fish.csv")
+```
+
+### Statement of Purpose:
+
+This data set is a record of 7 common different fish species in fish market sales. The source of this data set does not specify where this is collected from, but says it was uploaded around for years ago. The variables of the data set include the species name of the fish (Species), the weight of the fish in grams (Weight), the vertical length in cm (Length1), diagonal length in cm (Length2), cross length in cm (Length3), height in cm (Height), and diagonal width in cm (Width). My response variable will be the weight of the fish.This information could be helpful for a fisherman that might want to know the weight of a fish they are catching or size in order to use the correct kind of net.
+
+### Executive Summary:
+
+I predicted the weight of a fish with the variables included in this data set of 7 common fish species. This model would be useful for a fisherman trying to choose what kind of equipment they would need in order to catch a specific species of fish. I constructed and evaluated three different models depending on how the different variables related to the variable of weight. All of the visualizations included in this report show a polynomial relationship therefore I made my first model using only polynomial terms. This produced the first model, which was also the best model, with the least amount of error. As I tried to make the error lower by making the other two models, it just made the error worse. In my first model, one of the variables was not significant which is not great, so I changed that variable to not be a polynomial variable in the next model. Although this made the variable significant, it made the error higher, which is not better than the first model. Lastly, for my third model, I studied the visualization that compared height of the fish to the weight which shows the data splitting into three different distinct groups. Because of this, I decided to mutate my data to make those three distinct groups and made a model based off of that. All of the variables were significant, but there was even more error than the first and second model. I concluded after making these models, that although I could not lower the error from the first model it was not all that bad. My model predictions are off by about 29.96 grams, with the smallest fish being 0.0 grams and the largest being 1650 grams.
+
+```{r}
+market_split = initial_split(market_data)
+market_training = training(market_split)
+market_test = testing(market_split)
+```
+
+### Exploratory Data Analysis:
+
+```{r}
+ggplot(market_data, aes(x = Height, y = Weight, color = Species)) +
+  geom_point() + 
+  labs(title = "Height vs Weight", x = "Height (cm)", y = "Weight (grams)") + 
+  theme_minimal()
+```
+
+Note: Since there are about 3 different lines made of the points, we can say that some species definitely have the same comparison between weight and height.
+
+```{r}
+ggplot(market_data, aes(x = Width, y = Weight, color = Species)) +
+  geom_point() + 
+  labs(title = "Width vs Weight", x = "Width (cm)", y = "Weight (grams)") + 
+  theme_minimal()
+```
+
+Note: Based off this scatter plot, we can see that each species follows the same pattern with width vs weight.
+
+```{r}
+ggplot(market_data, aes(x = Length1, y = Weight, color = Species)) +
+  geom_point() + 
+  labs(title = "Length1 vs Weight", x = "Length1 (cm)", y = "Weight (grams)") + 
+  theme_minimal()
+```
+
+```{r}
+ggplot(market_data, aes(x = Length2, y = Weight, color = Species)) +
+  geom_point() + 
+  labs(title = "Length2 vs Weight", x = "Length2 (cm)", y = "Weight (grams)") + 
+  theme_minimal()
+```
+
+```{r}
+ggplot(market_data, aes(x = Length3, y = Weight, color = Species)) +
+  geom_point() + 
+  labs(title = "Length3 vs Weight", x = "Length3 (cm)", y = "Weight (grams)") + 
+  theme_minimal()
+```
+
+Note: for all the scatter plots of length vs weight, you can see that the all the species beside Pike are about the same.
+
+### Model Construction:
+
+```{r}
+market_training = market_training %>%
+  mutate(grouped_species = case_when(
+    Species == 'Pike' ~ 'Pike',
+    Species == 'Perch' | Species == 'Whitefish' | Species == 'Roach' | Species == 'Smelt' ~ 'Group1', 
+    Species == 'Bream' | Species == 'Parkki' ~ 'Group2' 
+  ))
+```
+
+```{r}
+market_test = market_test %>%
+  mutate(grouped_species = case_when(
+    Species == 'Pike' ~ 'Pike',
+    Species == 'Perch' | Species == 'Whitefish' | Species == 'Roach' | Species == 'Smelt' ~ 'Group1', 
+    Species == 'Bream' | Species == 'Parkki' ~ 'Group2' 
+  ))
+```
+
+```{r}
+set.seed(1)
+market_folds = vfold_cv(market_training)
+
+lr_lasso_spec= linear_reg(penalty = tune(), mixture = 1) %>%
+  set_engine("glmnet")
+
+
+lr_rec = recipe(Weight ~ Height + Width + Length1 + grouped_species, data = market_training) %>%
+  step_dummy(grouped_species) %>%
+  step_scale(all_predictors()) %>% 
+  step_poly(Width, degree = 2) %>%
+  step_poly(Length1, degree = 2)
+
+
+lr_lasso_wf = workflow() %>%
+  add_model(lr_lasso_spec) %>%
+  add_recipe(lr_rec)
+```
+
+### Model 1 Construction: Lasso Regression
+
+My first model used Height, Width, Length1, and grouped_species as variables, with Width and Length1 being polynomial regression. I mutated my data to make grouped_species which consists of Pike on it's own, Perch, Whitefish, Roach and Smelt in Group1, and Bream and Parkki in Group2.
+
+
+Note: Here I did lambda perimeter tuning in order to find the best value of lambda for my first model.
+
+```{r}
+lasso_results = lr_lasso_wf %>%
+  tune_grid(market_folds, grid = data.frame(penalty = seq(from=.2, to = 4, length.out = 20)))
+
+lasso_results %>%
+  autoplot()
+```
+
+Note: I found the value 0.4 to be the best for lambda in my first model.
+
+```{r}
+lasso_results %>%
+  show_best(n = 5)
+```
+
+
+```{r}
+best_params = tibble(penalty = 0.4)
+
+lasso_wf_final = lr_lasso_wf %>%
+  finalize_workflow(best_params)
+
+lr_lasso_fit = lasso_wf_final %>%
+  fit(market_training)
+```
+
+Note: This shows the coefficients for my variables in my first model.
+
+```{r}
+lr_lasso_fit %>% 
+  tidy()
+```
+
+Note: This shows the RMSE for my first model.
+
+```{r}
+lr_lasso_fit %>%
+  augment(market_test) %>%
+  rmse(Weight, .pred) 
+```
+
+Note: This shows the RSQ for my first model.
+
+```{r}
+lr_lasso_fit %>%
+  augment(market_test) %>%
+  rsq(Weight, .pred) 
+```
+
+### Model 1 Construction: Least Squares Regression
+
+This model is a least squares model using Height, Width, Length1, and grouped_species. Width and Length1 are polynomial regression.
+
+```{r}
+
+lr_spec = linear_reg() %>%
+  set_engine("lm")
+
+
+lr_rec4 = recipe(Weight ~ Height + Width + Length1 + grouped_species, data = market_training) %>%
+  step_dummy(grouped_species) %>%
+  step_scale(all_predictors()) %>% 
+  step_poly(Width, degree = 2) %>%
+  step_poly(Length1, degree = 2)
+
+
+lr_wf = workflow() %>%
+  add_model(lr_spec) %>%
+  add_recipe(lr_rec4)
+
+lr_results = lr_wf %>%
+  fit_resamples(market_folds) 
+```
+
+Note: This shows the RMSE and RSQ for my model
+
+```{r}
+lr_results %>%
+  collect_metrics()
+```
+
+Note: Shows the coeffients for my variables and their p-values.
+
+```{r}
+lr_fit <- lr_wf %>%
+  fit(market_training)
+
+lr_fit %>%
+  glance()
+
+lr_fit %>%
+  extract_fit_engine() %>%
+  tidy()
+```
+
+### Model 2 Construction: Least Squares Regression
+
+This model is a least squares model using Height, Width, and Length1 as variables, with Width and Length1 being polynomial regression.
+
+```{r}
+
+lr_spec2 = linear_reg() %>%
+  set_engine("lm")
+
+
+lr_rec5 = recipe(Weight ~ Height + Width + Length1, data = market_training) %>%
+  step_scale(all_predictors()) %>% 
+  step_poly(Width, degree = 2) %>%
+  step_poly(Length1, degree = 2)
+
+
+lr_wf2 = workflow() %>%
+  add_model(lr_spec2) %>%
+  add_recipe(lr_rec5)
+
+lr_results2 = lr_wf2 %>%
+  fit_resamples(market_folds) 
+```
+
+Note: Shows the RMSE and RSQ for my second model.
+
+```{r}
+lr_results2 %>%
+  collect_metrics()
+```
+Note: Shows the coefficients for my variables and their p-values from my second model.
+
+```{r}
+lr_fit2 <- lr_wf2 %>%
+  fit(market_training)
+
+lr_fit2 %>%
+  glance()
+
+lr_fit2 %>%
+  extract_fit_engine() %>%
+  tidy()
+```
+
+### Model 3 Construction: Least Squares Regression
+
+This model is a least squares model using grouped_species, Height, Width, and Length1 as variables with Length1 being polynomial regression.
+
+```{r}
+market_folds2 = vfold_cv(market_training)
+
+
+lr_spec3 = linear_reg() %>%
+  set_engine("lm")
+
+
+lr_rec6 = recipe(Weight ~ grouped_species + Height + Width + Length1, data = market_training) %>%
+  step_dummy(grouped_species) %>%
+  step_scale(all_predictors()) %>% 
+  step_poly(Length1, degree = 2)
+
+
+lr_wf3 = workflow() %>%
+  add_model(lr_spec3) %>%
+  add_recipe(lr_rec6)
+
+lr_results3 = lr_wf3 %>%
+  fit_resamples(market_folds2) 
+```
+
+
+Note: Shows the RMSE and RSQ for my third model.
+
+```{r}
+lr_results3 %>%
+  collect_metrics()
+```
+Note: Shows the coefficiants for my variables and their p-values for my third model.
+
+```{r}
+lr_fit3 <- lr_wf3 %>%
+  fit(market_training)
+
+lr_fit3 %>%
+  glance()
+
+lr_fit3 %>%
+  extract_fit_engine() %>%
+  tidy()
+```
+
+### Model Interpretation and Inference:
+
+By constructing several models, I found that there are some variables that seemed to have no effect on weight. These variables were Length2 and Length3. Although these had to significance when it came to predicting weight, it was still important to try and use them in the models. In the future, we could possibly look into trying many interaction terms to see if they show any kind of significance that way. On the other hand, the variables Height, Length1, Species, and Width seemed to definitely improve all my models in some way. Due to the polynomial regression shown in all of the scatter plots in the exploratory data section, I made all of the significant terms in my best model polynomial variables first. Then after seeing the p values, I noticed that Height was not significant with being polynomial so I changed them back to being regular linear regression. Also in the scatter plot of Weight vs Height, you can notice that the species group off into 3 distinct groups, which is the reason why I mutated my data to have different groups of species based off of that graph. By doing this, my RMSE went done which shows there is less error in my model. The formula for the model is Width = 105.4 + 174 \* Height + 44 \* Group2 - 37.3 \* Pike + 421.1 \* Width + 470.5 \* Width\^2 + 2442.4 \* Length1 + 1106.3 \* Length1\^2. When I created the recipe for this formula, I scaled all the predictors so that I could interpret which variables had the most influence on weight. This model shows that Length1 had the most influence on predicting weight, followed by Length1\^2 because they have the largest coefficients. All the variables in my first model were significant except for Width, with there p-values being Height = 1.3e\^-8, Group2 = 2.9 e\^-3, Pike = 1.5e\^-2, Width = 2.8e\^-1, Width\^2= 2.9e\^-8, Length1 = 3.5e\^-10, Length1\^2 = 1.3e\^-17.
+
+### Conclusion:
+
+In conclusion, I made a lot of interesting discoveries while make several models. The one thing I found is that although some of my p-values were not significant (\< .05) the variables still made a good contribution to my models by making the RMSE lower and the RSQ higher. I also found that by doing my exploratory data analysis, that when the variables are compared to each other through scatter plots they seem to show a polynomial regression. When I made my first model, I made them all polynomial regressions at first, but the p-values became insignificant. So although they looked polynomial on the scatter plot, it actually made my model worse. When I changed them back to linear regression, my p-values became significant again and my RMSE went down and my RSQ went up. Lastly, I discovered that by grouping off the species, I was able to improve my model. By leaving the species all on their own, I was over fitting the training data. This was a result of including all the variables as polynomial regression.
